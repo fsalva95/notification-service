@@ -1,0 +1,197 @@
+openapi: 3.0.3
+info:
+  title: Notification Service API
+  version: 1.0.0
+  description: |
+    Creates notifications and exposes their delivery status.
+
+    Delivery is simulated: a notification is stored as `queued`, then
+    asynchronously moves to `sent` or `failed`. Statuses never go backwards.
+servers:
+  - url: http://localhost:3000
+tags:
+  - name: notifications
+    description: Create notifications and read their status.
+paths:
+  /notifications:
+    post:
+      tags: [notifications]
+      operationId: createNotification
+      summary: Create a notification
+      description: Stores the notification as `queued` and triggers a simulated send. Read the outcome with `GET /notifications/{id}`.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateNotificationRequest'
+            example:
+              recipient: jane.doe@example.com
+              channel: email
+              message: Your order has shipped.
+      responses:
+        '201':
+          description: Notification stored and queued for delivery.
+          headers:
+            Location:
+              description: Relative URL of the created notification.
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CreateNotificationResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '415':
+          $ref: '#/components/responses/UnsupportedMediaType'
+        default:
+          $ref: '#/components/responses/UnexpectedError'
+  /notifications/{id}:
+    get:
+      tags: [notifications]
+      operationId: getNotification
+      summary: Get a notification
+      description: Returns the channel and the current status of a notification.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Notification id returned by `POST /notifications`.
+          schema:
+            type: string
+      responses:
+        '200':
+          description: The notification and its current status.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Notification'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        default:
+          $ref: '#/components/responses/UnexpectedError'
+components:
+  schemas:
+    Channel:
+      type: string
+      enum: [email, sms, push]
+    NotificationStatus:
+      type: string
+      enum: [queued, sent, failed]
+      description: |
+        - `queued`: stored, waiting for the send.
+        - `sent`: the send succeeded.
+        - `failed`: the send failed.
+
+        `sent` and `failed` are final.
+    CreateNotificationRequest:
+      type: object
+      additionalProperties: false
+      required: [recipient, channel, message]
+      properties:
+        recipient:
+          type: string
+          minLength: 1
+          maxLength: 320
+          pattern: '\S'
+          description: Email address, phone number or device token, depending on the channel.
+          example: jane.doe@example.com
+        channel:
+          $ref: '#/components/schemas/Channel'
+        message:
+          type: string
+          minLength: 1
+          maxLength: 1000
+          pattern: '\S'
+          description: Message body. Must contain at least one non-whitespace character.
+          example: Your order has shipped.
+    CreateNotificationResponse:
+      type: object
+      additionalProperties: false
+      required: [id, status]
+      properties:
+        id:
+          type: string
+          example: 3f2b8c5e-9d1a-4c7e-8b34-5a6f1e2d7c90
+        status:
+          type: string
+          enum: [queued]
+    Notification:
+      type: object
+      description: A notification and its current status. The recipient and the message are never returned.
+      additionalProperties: false
+      required: [id, channel, status]
+      properties:
+        id:
+          type: string
+          example: 3f2b8c5e-9d1a-4c7e-8b34-5a6f1e2d7c90
+        channel:
+          $ref: '#/components/schemas/Channel'
+        status:
+          $ref: '#/components/schemas/NotificationStatus'
+    Error:
+      type: object
+      required: [code, message]
+      properties:
+        code:
+          type: string
+          enum: [VALIDATION_ERROR, NOT_FOUND, UNSUPPORTED_MEDIA_TYPE, BAD_REQUEST, INTERNAL_ERROR]
+          description: Machine-readable error code. BAD_REQUEST covers the other client errors, such as an unsupported method.
+          example: VALIDATION_ERROR
+        message:
+          type: string
+          example: Request validation failed
+        details:
+          type: array
+          description: One entry per violation (validation errors only).
+          items:
+            type: object
+            required: [path, message]
+            properties:
+              path:
+                type: string
+                example: /body/channel
+              message:
+                type: string
+                example: "must be equal to one of the allowed values: email, sms, push"
+  responses:
+    BadRequest:
+      description: Malformed JSON, or a request that does not match the schema.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          example:
+            code: VALIDATION_ERROR
+            message: "request/body/channel must be equal to one of the allowed values: email, sms, push"
+            details:
+              - path: /body/channel
+                message: "must be equal to one of the allowed values: email, sms, push"
+    UnsupportedMediaType:
+      description: The request body is not application/json.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          example:
+            code: UNSUPPORTED_MEDIA_TYPE
+            message: Content-Type must be application/json
+    NotFound:
+      description: No notification exists with the given id.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          example:
+            code: NOT_FOUND
+            message: Notification not found
+    UnexpectedError:
+      description: Unexpected error.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          example:
+            code: INTERNAL_ERROR
+            message: Internal server error
